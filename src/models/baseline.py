@@ -1,42 +1,46 @@
 import tensorflow as tf
 from tensorflow.keras import layers, models
 
-def build_baseline_cnn(input_shape=(224, 224, 3)):
+def build_baseline_cnn(input_shape=(224, 224, 3), norm_type='batchnorm', bn_momentum=0.99):
     """
     Builds a simple baseline Convolutional Neural Network for binary classification.
-    Since the dataset is very small (200 train images), we must heavily regularize
-    to prevent extreme overfitting.
     
     Args:
         input_shape (tuple): The shape of the input images.
+        norm_type (str): 'batchnorm' or 'layernorm'
+        bn_momentum (float): Momentum for BatchNormalization
         
     Returns:
-        tf.keras.Model: Compiled or uncompiled Keras model.
+        tf.keras.Model: Uncompiled Keras model.
     """
     
-    # Input and Data Augmentation Layer (integrated into model for deployment simplicity)
     inputs = tf.keras.Input(shape=input_shape)
-    
     x = layers.Rescaling(1./255)(inputs)
     
-    # Data Augmentation to combat small dataset size
     x = layers.RandomFlip("horizontal_and_vertical")(x)
     x = layers.RandomRotation(0.2)(x)
     
+    def apply_norm(tensor):
+        if norm_type == 'batchnorm':
+            return layers.BatchNormalization(momentum=bn_momentum)(tensor)
+        elif norm_type == 'layernorm':
+            return layers.LayerNormalization()(tensor)
+        return tensor
+        
     # Block 1
     x = layers.Conv2D(32, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.BatchNormalization()(x)
+    x = apply_norm(x)
     
     # Block 2
     x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.BatchNormalization()(x)
+    x = apply_norm(x)
     
     # Block 3
     x = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.BatchNormalization()(x)
+    x = apply_norm(x)
     
     # Global pooling is preferred over Flatten for better generalization
     x = layers.GlobalAveragePooling2D()(x)

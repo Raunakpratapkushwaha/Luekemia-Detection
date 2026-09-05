@@ -136,3 +136,14 @@ A threshold sweep was executed and saved to `reports/threshold_analysis.csv` and
 
 **Selected Threshold**: ~0.548 (the midpoint of the Class 0 and Class 1 means).
 **Justification**: This threshold perfectly distinguishes the non-converged distributions without requiring architectural changes, though the fundamental fix is to address the BatchNormalization convergence or use a different architecture in Step 4.
+
+### Step 3: Preprocessing Verification
+
+**Objective**: Mathematically assert that normalization, shuffling, resizing, and augmentation pipelines are correct and free from train/val leakage.
+
+**Findings**:
+A pipeline audit script (`verify_pipeline.py`) proved the following:
+- **Normalization**: The raw `tf.data.Dataset` loader explicitly returns tensors in the range `[0, 255]`. Normalization is *not* applied twice; it is exclusively handled by the `Rescaling(1./255)` layer within the model architecture.
+- **Shuffling**: Training batches vary sequentially, proving correct dataset shuffling.
+- **Augmentation (Train vs Val)**: Keras correctly toggles the `RandomFlip` and `RandomRotation` layers off when `training=False`, meaning the validation set remains mathematically un-augmented.
+- **Aspect Ratio Distortion**: The default Keras loader behavior resizes images to `224x224` *without* preserving aspect ratio (`crop_to_aspect_ratio=False`). This induces slight geometric squashing, which we explicitly note. Because peripheral blood smears have no true "orientation," this is clinically acceptable for a proof-of-concept, but future pipelines could employ center-cropping to avoid stretching cell nuclei.
