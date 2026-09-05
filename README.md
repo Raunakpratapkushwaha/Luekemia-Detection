@@ -81,7 +81,26 @@ Because patient-level CV is impossible on ALL-IDB2 as provided, we must use the 
   - **Balance**: Perfectly balanced (1:1 ratio) in both train and val splits.
 
 ## Model Registry
-*(To be populated during the coding phase)*
+
+- **Experiment ID**: EXP_001_Baseline_CNN
+- **Architecture**: Custom 3-block CNN with BatchNormalization, GlobalAveragePooling, and heavy Dropout.
+- **Pretrained Weights**: None (trained from scratch)
+- **Input Resolution**: 224x224 RGB
+- **Optimizer**: Adam (lr=1e-4)
+- **Loss**: BinaryCrossentropy
+- **Batch Size**: 16
+- **Epochs**: 10 (completed)
+- **Augmentation**: RandomFlip, RandomRotation
+- **Class Weighting**: None (dataset is perfectly balanced)
+- **Checkpoint Path**: `checkpoints/best_baseline.keras`
 
 ## Results Registry
-*(To be populated during the evaluation phase)*
+
+> [!WARNING]
+> **Inflated Results Disclaimer**
+> As documented in the Patient Split Audit, the validation split mathematically contains cells from the same patients as the training split. These metrics do NOT represent real-world generalization to unseen patients.
+
+**EXP_001_Baseline_CNN Results (Validation Set):**
+- **Loss**: 0.6819
+- **Accuracy**: 50.00% (Threshold calibration required)
+- **ROC-AUC**: 0.9700 (Very high class separability, confirming the model learned the morphological features, though highly likely inflated due to patient leakage).

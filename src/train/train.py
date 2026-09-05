@@ -40,8 +40,7 @@ def train_model(data_dir, epochs=50, batch_size=32):
             monitor='val_loss',
             patience=10,
             restore_best_weights=True
-        ),
-        TensorBoard(log_dir="logs")
+        )
     ]
     
     print("Starting training...")
