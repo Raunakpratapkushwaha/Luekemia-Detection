@@ -3,6 +3,7 @@ import sys
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+import pickle
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, roc_auc_score, confusion_matrix, precision_recall_curve, auc
 
@@ -12,7 +13,12 @@ from src.models.baseline import build_baseline_cnn
 
 def load_data_from_manifest(manifest_path):
     df = pd.read_csv(manifest_path)
+    
+    # 5. The known duplicate was excluded through the manifest.
+    original_len = len(df)
     df = df[df['is_duplicate'] == False].copy()
+    assert len(df) == original_len - 1, "Duplicate exclusion failed or multiple duplicates found!"
+    
     X = df['filepath'].values
     y = df['label'].values
     return X, y
@@ -37,7 +43,7 @@ def find_best_threshold(y_true, y_prob):
     best_thresh = 0.5
     for thresh in np.arange(0.1, 0.95, 0.05):
         y_pred = (y_prob >= thresh).astype(int)
-        score = f1_score(y_true, y_pred)
+        score = f1_score(y_true, y_pred, zero_division=0)
         if score > best_f1:
             best_f1 = score
             best_thresh = thresh
@@ -47,8 +53,11 @@ def evaluate_metrics(y_true, y_prob, threshold):
     y_pred = (y_prob >= threshold).astype(int)
     acc = accuracy_score(y_true, y_pred)
     bal_acc = balanced_accuracy_score(y_true, y_pred)
-    f1 = f1_score(y_true, y_pred)
-    roc_auc = roc_auc_score(y_true, y_prob)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
+    try:
+        roc_auc = roc_auc_score(y_true, y_prob)
+    except:
+        roc_auc = 0
     
     precision_curve, recall_curve, _ = precision_recall_curve(y_true, y_prob)
     pr_auc = auc(recall_curve, precision_curve)
@@ -59,13 +68,28 @@ def evaluate_metrics(y_true, y_prob, threshold):
         sens = tp / (tp + fn) if (tp + fn) > 0 else 0
         spec = tn / (tn + fp) if (tn + fp) > 0 else 0
         prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+        rec = sens
     else:
-        sens = spec = prec = 0
+        sens = spec = prec = rec = 0
+        tn = fp = fn = tp = 0
         
     return {
         'roc_auc': roc_auc, 'pr_auc': pr_auc, 'accuracy': acc, 'bal_acc': bal_acc,
-        'sensitivity': sens, 'specificity': spec, 'precision': prec, 'f1': f1, 'threshold': threshold
+        'sensitivity': sens, 'specificity': spec, 'precision': prec, 'recall': rec, 'f1': f1, 'threshold': threshold,
+        'tn': tn, 'fp': fp, 'fn': fn, 'tp': tp,
+        'min_prob': np.min(y_prob), 'max_prob': np.max(y_prob), 
+        'mean_prob': np.mean(y_prob), 'std_prob': np.std(y_prob),
+        'mean_prob_class0': np.mean(y_prob[y_true == 0]) if np.any(y_true == 0) else 0,
+        'mean_prob_class1': np.mean(y_prob[y_true == 1]) if np.any(y_true == 1) else 0
     }
+
+def get_predictions(model, ds):
+    preds, true_labels = [], []
+    for images, labels in ds:
+        p = model.predict(images, verbose=0)
+        preds.extend(p.flatten())
+        true_labels.extend(labels.numpy().flatten())
+    return np.array(true_labels), np.array(preds)
 
 def run_nested_kfold():
     manifest_path = os.path.join(os.path.dirname(__file__), '../data/manifest.csv')
@@ -75,10 +99,11 @@ def run_nested_kfold():
     models_to_evaluate = ['baseline', 'resnet50', 'efficientnetb0', 'convnexttiny']
     
     all_results = []
+    histories = {}
     
     for model_name in models_to_evaluate:
         print(f"\n{'='*60}\nEvaluating {model_name} with Nested 5-Fold CV\n{'='*60}")
-        fold_metrics = []
+        histories[model_name] = {}
         
         for fold, (train_idx, test_idx) in enumerate(outer_cv.split(X, y)):
             print(f"\n--- {model_name} Outer Fold {fold+1}/5 ---")
@@ -86,11 +111,18 @@ def run_nested_kfold():
             X_outer_train, y_outer_train = X[train_idx], y[train_idx]
             X_outer_test, y_outer_test = X[test_idx], y[test_idx]
             
-            # Inner split for early stopping and threshold tuning
-            # 25% of outer train (80% total) = 20% of total data for inner val
+            # Inner split
             X_inner_train, X_inner_val, y_inner_train, y_inner_val = train_test_split(
                 X_outer_train, y_outer_train, test_size=0.25, stratify=y_outer_train, random_state=fold
             )
+            
+            # --- STRICT PROGRAMMATIC AUDIT ---
+            # 1. No outer-test image used for training
+            assert len(set(X_outer_test).intersection(set(X_inner_train))) == 0
+            # 2. No outer-test image used for early stopping
+            assert len(set(X_outer_test).intersection(set(X_inner_val))) == 0
+            
+            print(f"Sample Counts | Outer Train: {len(X_outer_train)} | Inner Train: {len(X_inner_train)} | Inner Val: {len(X_inner_val)} | Outer Test: {len(X_outer_test)}")
             
             inner_train_ds = get_dataset(X_inner_train, y_inner_train, is_training=True)
             inner_val_ds = get_dataset(X_inner_val, y_inner_val, is_training=False)
@@ -99,77 +131,67 @@ def run_nested_kfold():
             if model_name == 'baseline':
                 model = build_baseline_cnn(input_shape=(224, 224, 3), norm_type='layernorm')
             else:
-                try:
-                    model = build_transfer_model(model_name, input_shape=(224, 224, 3), freeze_base=True)
-                except Exception as e:
-                    print(f"Failed to build {model_name}: {e}")
-                    continue
+                model = build_transfer_model(model_name, input_shape=(224, 224, 3), freeze_base=True)
                     
-            # 1. Initial Training (train head, or full baseline)
+            # --- PHASE 1: HEAD-ONLY TRAINING ---
             model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
                           loss=tf.keras.losses.BinaryCrossentropy(), metrics=['accuracy'])
-                          
             early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-            model.fit(inner_train_ds, validation_data=inner_val_ds, epochs=15, callbacks=[early_stop], verbose=1)
             
-            # 2. Fine-tuning (only for transfer models)
+            print(f"Training Head (or baseline) for {model_name}...")
+            history_head = model.fit(inner_train_ds, validation_data=inner_val_ds, epochs=15, callbacks=[early_stop], verbose=1)
+            
+            # Evaluate HEAD-ONLY
+            inner_val_true, inner_val_preds = get_predictions(model, inner_val_ds)
+            # 3. No outer test used for threshold selection (done on inner val)
+            best_thresh_head = find_best_threshold(inner_val_true, inner_val_preds)
+            outer_test_true, outer_test_preds = get_predictions(model, outer_test_ds)
+            
+            metrics_head = evaluate_metrics(outer_test_true, outer_test_preds, best_thresh_head)
+            metrics_head.update({'model': model_name, 'fold': fold + 1, 'phase': 'HEAD_ONLY'})
+            all_results.append(metrics_head)
+            print(f"HEAD-ONLY -> ROC-AUC: {metrics_head['roc_auc']:.4f}, Acc: {metrics_head['accuracy']:.4f}, F1: {metrics_head['f1']:.4f}")
+            
+            # --- PHASE 2: FULL FINE-TUNING (Only for transfer models) ---
             if model_name != 'baseline':
                 print(f"Fine-tuning {model_name}...")
-                # Unfreeze all layers
                 model.trainable = True
+                
+                # 4. No outer test used to choose fine tuning params (early stopping uses inner val)
                 model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
                               loss=tf.keras.losses.BinaryCrossentropy(), metrics=['accuracy'])
                 early_stop_ft = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=4, restore_best_weights=True)
-                model.fit(inner_train_ds, validation_data=inner_val_ds, epochs=10, callbacks=[early_stop_ft], verbose=1)
+                history_ft = model.fit(inner_train_ds, validation_data=inner_val_ds, epochs=10, callbacks=[early_stop_ft], verbose=1)
                 
-            # 3. Threshold Tuning on INNER VAL
-            inner_val_preds = []
-            inner_val_true = []
-            for images, labels in inner_val_ds:
-                preds = model.predict(images, verbose=0)
-                inner_val_preds.extend(preds.flatten())
-                inner_val_true.extend(labels.numpy().flatten())
+                # Evaluate FINE-TUNED
+                inner_val_true_ft, inner_val_preds_ft = get_predictions(model, inner_val_ds)
+                best_thresh_ft = find_best_threshold(inner_val_true_ft, inner_val_preds_ft)
                 
-            best_thresh = find_best_threshold(np.array(inner_val_true), np.array(inner_val_preds))
-            print(f"Tuned Threshold on Inner Val: {best_thresh:.2f}")
-            
-            # 4. Final Evaluation on OUTER TEST (Untouched)
-            outer_test_preds = []
-            outer_test_true = []
-            for images, labels in outer_test_ds:
-                preds = model.predict(images, verbose=0)
-                outer_test_preds.extend(preds.flatten())
-                outer_test_true.extend(labels.numpy().flatten())
+                outer_test_true_ft, outer_test_preds_ft = get_predictions(model, outer_test_ds)
+                metrics_ft = evaluate_metrics(outer_test_true_ft, outer_test_preds_ft, best_thresh_ft)
+                metrics_ft.update({'model': model_name, 'fold': fold + 1, 'phase': 'FINE_TUNED'})
+                all_results.append(metrics_ft)
+                print(f"FINE-TUNED -> ROC-AUC: {metrics_ft['roc_auc']:.4f}, Acc: {metrics_ft['accuracy']:.4f}, F1: {metrics_ft['f1']:.4f}")
                 
-            metrics = evaluate_metrics(np.array(outer_test_true), np.array(outer_test_preds), best_thresh)
-            print(f"Outer Test ROC-AUC: {metrics['roc_auc']:.4f}, Acc: {metrics['accuracy']:.4f}, F1: {metrics['f1']:.4f}")
-            
-            metrics['model'] = model_name
-            metrics['fold'] = fold + 1
-            fold_metrics.append(metrics)
+                histories[model_name][fold+1] = {
+                    'head': history_head.history,
+                    'ft': history_ft.history
+                }
+            else:
+                histories[model_name][fold+1] = {
+                    'head': history_head.history
+                }
+                
             tf.keras.backend.clear_session()
-            
-        if fold_metrics:
-            df_fold = pd.DataFrame(fold_metrics)
-            avg_metrics = df_fold.mean().to_dict()
-            std_metrics = df_fold.std().to_dict()
-            
-            print(f"\n{model_name} Nested CV Average:")
-            print(f"ROC-AUC: {avg_metrics['roc_auc']:.4f} (+/- {std_metrics['roc_auc']:.4f})")
-            print(f"Accuracy: {avg_metrics['accuracy']:.4f} (+/- {std_metrics['accuracy']:.4f})")
-            print(f"F1 Score: {avg_metrics['f1']:.4f} (+/- {std_metrics['f1']:.4f})")
-            
-            all_results.extend(fold_metrics)
             
     os.makedirs('reports', exist_ok=True)
     df_results = pd.DataFrame(all_results)
-    df_results.to_csv('reports/nested_kfold_results.csv', index=False)
+    df_results.to_csv('reports/nested_kfold_detailed_results.csv', index=False)
     
-    # Generate final summary table
-    summary = df_results.groupby('model').mean()[['roc_auc', 'pr_auc', 'accuracy', 'sensitivity', 'specificity', 'f1']].round(4)
-    print("\nFINAL NESTED CV COMPARISON TABLE:")
-    print(summary)
-    summary.to_csv('reports/nested_kfold_summary.csv')
+    with open('reports/training_histories.pkl', 'wb') as f:
+        pickle.dump(histories, f)
+        
+    print("\nFINAL NESTED CV COMPARISON COMPLETED. Saved to reports/nested_kfold_detailed_results.csv")
 
 if __name__ == "__main__":
     run_nested_kfold()
