@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras import layers, models
 
-def build_baseline_cnn(input_shape=(224, 224, 3), norm_type='batchnorm', bn_momentum=0.99):
+def build_baseline_cnn(input_shape=(224, 224, 3), norm_type='layernorm', bn_momentum=0.99):
     """
     Builds a simple baseline Convolutional Neural Network for binary classification.
     
