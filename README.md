@@ -11,7 +11,15 @@
 - **Scope**: Single-cell classification (Blast vs. Non-Blast).
 - **Non-Goals**: Full slide analysis, autonomous patient diagnosis, subtyping of leukemia.
 - **Limitations**: Restricted to the staining and imaging protocols of the training data. Potential biases towards specific imaging equipment. The dataset lacks patient-level metadata.
-- **Current Project Status**: Pre-Phase-3 Audit Complete. Major structural limitations in data leakage identified.
+- **Current Project Status**: Phase 5 (C-NMC Colab Integration). Local execution restricted to code authoring only.
+
+## Compute Architecture & Execution Policy
+
+To manage the heavy computational requirements of dataset processing and deep learning:
+- **Local Mac (Antigravity)**: Code development, repository inspection, GitHub syncing, and documentation updates ONLY.
+- **Google Colab (NVIDIA T4 GPU)**: All ML computation, heavy dataset processing, cross-validation, and model inference.
+- **Google Drive**: Persistent storage for datasets (`/content/drive/MyDrive/leukemia_project/`), model checkpoints, manifests, and generated reports.
+- **GitHub**: Synchronization bridge between local development and Colab execution. Large artifacts are strictly excluded from git.
 
 ## Research Question
 
@@ -227,12 +235,19 @@ To clinically validate the EfficientNetB0 model on patient-independent data, we 
 **Recommendation:** We recommend the **C-NMC 2019 Dataset (ISBI Challenge)**. It is highly reputable, focuses on ALL (matching our task), provides thousands of images, and crucially, provides explicit Subject IDs allowing for strict patient-level isolation.
 
 ### External Dataset Audit & C-NMC Dataset Registry
-*(Pending Colab extraction)*
+The current external dataset is a **subset** of the official C-NMC 2019 dataset (retrieved from the IBIA institutional repository):
+- **Total Subset Images**: 6008 BMP images
+- **fold_0**: 2270 images (19 subjects)
+- **fold_1**: 2291 images (11 subjects)
+- **fold_2**: 1447 images (11 subjects)
+- **Subject-Disjoint Verification**: Checked (no subject leakage across these folds).
+
+*Note: This is an incomplete subset and should not be described as the full 10,000+ image dataset.*
+
+*(Further details pending Colab manifest extraction)*
 Will document:
-- Total patient counts.
-- Image counts per class.
-- Class imbalance metrics.
-- Image resolution and source parameters.
+- Label distribution (ALL vs HEM).
+- Unreadable image/corruption audit.
 
 ### Domain Shift Analysis
 *(Pending Colab analysis)*
