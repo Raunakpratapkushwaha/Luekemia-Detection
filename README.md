@@ -225,3 +225,35 @@ To clinically validate the EfficientNetB0 model on patient-independent data, we 
 | **Acevedo (PBC)** | Normal vs Blasts | Peripheral Blood | 17,000 (8 classes) | No | Clinic of Barcelona | Not ideal (mostly normal cells, no patient IDs). |
 
 **Recommendation:** We recommend the **C-NMC 2019 Dataset (ISBI Challenge)**. It is highly reputable, focuses on ALL (matching our task), provides thousands of images, and crucially, provides explicit Subject IDs allowing for strict patient-level isolation.
+
+### External Dataset Audit & C-NMC Dataset Registry
+*(Pending Colab extraction)*
+Will document:
+- Total patient counts.
+- Image counts per class.
+- Class imbalance metrics.
+- Image resolution and source parameters.
+
+### Domain Shift Analysis
+*(Pending Colab analysis)*
+Will document:
+- Staining differences between ALL-IDB2 and C-NMC.
+- Microscope and resolution differences.
+
+### Frozen External Validation Results
+*(Pending execution on Colab)*
+- Zero-shot evaluation of the `EfficientNetB0 (Head-Only)` model locked on ALL-IDB2.
+- Evaluated on the C-NMC dataset without retraining or threshold-tuning.
+
+### Patient-Level Split Audit
+*(Pending Colab execution)*
+Will document strict separation of subjects across train/validation sets for C-NMC retraining.
+
+### C-NMC Training Results & Comparison with ALL-IDB2
+*(Pending Colab execution)*
+Will document:
+- Performance of retrained models (EfficientNetB0, ResNet50, etc.).
+- Performance delta compared to the ALL-IDB2 baseline.
+
+### Remaining Limitations
+*(To be updated after C-NMC validation)*
