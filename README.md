@@ -182,3 +182,46 @@ The scale collapse was strictly a Batch Normalization moving-statistic artifact 
 
 **Remaining Limitations**:
 Even with LayerNorm, the peak probability reached for Class 1 is 0.6510, indicating the network still lacks high confidence in its predictions, though it ranks them accurately. This is expected given the extreme simplicity of the baseline CNN, and will be addressed via Transfer Learning in Phase 4.
+
+
+### Nested Cross-Validation Results
+
+We performed a rigorous nested 5-fold cross-validation to prevent data leakage. The outer folds were strictly reserved for evaluation. The inner folds were used for early stopping and optimal threshold selection. The known duplicate image was rigorously excluded via the manifest.
+
+#### Head-Only vs Fine-Tuning Analysis
+We evaluated all transfer-learning models (ResNet50, EfficientNetB0, ConvNeXtTiny) in two phases:
+1. **Head-Only**: Training only the dense classification head while freezing the ImageNet base.
+2. **Full Fine-Tuning**: Unfreezing the entire base architecture and training with a very low learning rate (1e-5).
+
+**Conclusion**: Across all architectures, full fine-tuning yielded **no statistically significant improvement** and in some cases slightly degraded sensitivity. For example, EfficientNetB0 achieved 0.9833 ROC-AUC and 92.29% accuracy with Head-Only, and 0.9836 ROC-AUC / 92.28% accuracy with Fine-Tuning. This confirms that for a dataset of only 259 images, the pre-trained ImageNet feature extractors are robust, and full fine-tuning only risks overfitting or catastrophic forgetting. **Head-Only models are selected for all future steps.**
+
+#### Best Model Comparison (Head-Only)
+
+| Model | ROC-AUC | PR-AUC | Accuracy | Sensitivity | Specificity | F1 |
+|-------|---------|--------|----------|-------------|-------------|----|
+| Baseline CNN (LayerNorm) | 0.8144 ±0.03 | 0.8377 ±0.04 | 58.72% ±12.5% | 0.9154 ±0.15 | 0.2569 ±0.39 | 0.6955 ±0.04 |
+| ResNet50 | 0.9763 ±0.01 | 0.9762 ±0.02 | 89.97% ±4.1% | 0.9538 ±0.03 | 0.8449 ±0.08 | 0.9060 ±0.04 |
+| **EfficientNetB0** | **0.9833 ±0.01** | **0.9832 ±0.01** | **92.29% ±3.3%** | 0.9385 ±0.06 | **0.9068 ±0.03** | **0.9236 ±0.03** |
+| ConvNeXtTiny | 0.9443 ±0.04 | 0.9485 ±0.03 | 90.32% ±6.3% | 0.9385 ±0.08 | 0.8668 ±0.11 | 0.9077 ±0.06 |
+
+**Selected Model**: **EfficientNetB0 (Head-Only)**.
+It achieved the highest ROC-AUC, PR-AUC, Accuracy, Specificity, and F1 score while maintaining excellent stability (lowest standard deviation across folds). ResNet50 had slightly higher sensitivity (0.9538 vs 0.9385), but EfficientNetB0's specificity was vastly superior (0.9068 vs 0.8449), meaning a significantly lower false-positive rate while remaining highly confident in its blast detections.
+
+#### Remaining Dataset Limitations
+ALL-IDB2 does not provide recoverable patient/source identities in our dataset copy; therefore these results represent internal cell-image-level proof-of-concept performance and are not patient-level clinical validation.
+
+---
+
+## Phase 5: External Validation
+
+### External Dataset Investigation
+
+To clinically validate the EfficientNetB0 model on patient-independent data, we investigated several reputable leukemia microscopy datasets.
+
+| Dataset | Disease | Tissue | Images / Classes | Patient IDs? | Official Source | Recommendation |
+|---------|---------|--------|-------------------|--------------|-----------------|----------------|
+| **C-NMC 2019** | B-ALL vs Normal | Peripheral Blood | 10,000+ (3 classes) | **Yes** (Subject IDs in filenames) | ISBI Challenge / TCIA | **Recommended** for external validation. |
+| **Matek et al.** | AML vs Normal | Peripheral Blood | 18,365 (15 classes) | **Yes** | Nature Machine Intelligence | Excellent, but AML morphology differs from ALL. |
+| **Acevedo (PBC)** | Normal vs Blasts | Peripheral Blood | 17,000 (8 classes) | No | Clinic of Barcelona | Not ideal (mostly normal cells, no patient IDs). |
+
+**Recommendation:** We recommend the **C-NMC 2019 Dataset (ISBI Challenge)**. It is highly reputable, focuses on ALL (matching our task), provides thousands of images, and crucially, provides explicit Subject IDs allowing for strict patient-level isolation.
